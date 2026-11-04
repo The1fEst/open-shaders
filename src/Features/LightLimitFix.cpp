@@ -41,6 +41,8 @@ namespace
 	constexpr float kBillboardBrightnessMax = 10.0f;
 	constexpr float kBillboardRadiusMin = 0.0f;
 	constexpr float kBillboardRadiusMax = 10.0f;
+	constexpr float kParticleLightsSizeMin = 0.1f;
+	constexpr float kParticleLightsSizeMax = 5.0f;
 	constexpr float kParticleClusterThresholdMin = 8.0f;
 	constexpr float kParticleClusterThresholdMax = 128.0f;
 	constexpr int kMaxParticlesPerEmitterMin = 32;
@@ -72,6 +74,8 @@ namespace
 			Util::ClampFiniteOrDefault(a_settings.BillboardBrightness, kBillboardBrightnessMin, kBillboardBrightnessMax, 1.0f);
 		a_settings.BillboardRadius =
 			Util::ClampFiniteOrDefault(a_settings.BillboardRadius, kBillboardRadiusMin, kBillboardRadiusMax, 1.0f);
+		a_settings.ParticleLightsSize =
+			Util::ClampFiniteOrDefault(a_settings.ParticleLightsSize, kParticleLightsSizeMin, kParticleLightsSizeMax, std::numbers::sqrt2_v<float>);
 		a_settings.ParticleClusterThreshold =
 			Util::ClampFiniteOrDefault(a_settings.ParticleClusterThreshold, kParticleClusterThresholdMin, kParticleClusterThresholdMax, 32.0f);
 		a_settings.MaxParticlesPerEmitter = std::clamp(a_settings.MaxParticlesPerEmitter, kMaxParticlesPerEmitterMin, kMaxParticlesPerEmitterMax);
@@ -150,6 +154,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ParticleRadius,
 	BillboardBrightness,
 	BillboardRadius,
+	EnableParticleLightsInverseSquare,
+	ParticleLightsSize,
 	ParticleClusterThreshold,
 	MaxParticlesPerEmitter,
 	MaxParticleDistance,
@@ -481,6 +487,19 @@ void LightLimitFix::DrawParticleLightSettings()
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s", T("feature.light_limit_fix.billboard_radius_tooltip", "Radius multiplier for billboard emitters. Larger = light reaches further."));
 		}
+		ImGui::Checkbox(T("feature.light_limit_fix.particle_inverse_square", "Inverse Square Falloff"), &settings.EnableParticleLightsInverseSquare);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s",
+				T("feature.light_limit_fix.particle_inverse_square_tooltip",
+					"Particle and billboard lights fade with the inverse square of distance instead of a smooth ramp to the radius.\n"
+					"Bright near the source, dim far away, with a long weak tail. Stacked lights overexpose rooms less."));
+		}
+		ImGui::BeginDisabled(!settings.EnableParticleLightsInverseSquare);
+		ImGui::SliderFloat(T("feature.light_limit_fix.particle_lights_size", "Source Size"), &settings.ParticleLightsSize, kParticleLightsSizeMin, kParticleLightsSizeMax, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T("feature.light_limit_fix.particle_lights_size_tooltip", "Size of the light source in meters for inverse square falloff. Larger = flatter and softer close to the light; smaller = sharper hotspot."));
+		}
+		ImGui::EndDisabled();
 
 		ImGui::TreePop();
 	}

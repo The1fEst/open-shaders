@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <numbers>
 #include <shared_mutex>
 
 struct LightLimitFix : OverlayFeature
@@ -537,6 +538,8 @@ public:
 		float ParticleRadius = 1.0f;
 		float BillboardBrightness = 1.0f;
 		float BillboardRadius = 1.0f;
+		bool EnableParticleLightsInverseSquare = false;
+		float ParticleLightsSize = std::numbers::sqrt2_v<float>;
 		float ParticleClusterThreshold = 32.0f;
 		int MaxParticlesPerEmitter = 256;
 		float MaxParticleDistance = 6000.0f;

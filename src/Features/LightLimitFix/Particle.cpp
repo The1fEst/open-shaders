@@ -3,6 +3,7 @@
 
 #include "Features/LightLimitFix.h"
 
+#include "Features/LightLimitFix/RadiusMath.h"
 #include "Globals.h"
 #include "ShaderCache.h"
 #include "Util.h"
@@ -544,6 +545,11 @@ void LightLimitFix::AddCachedParticleLights(eastl::vector<LightData>& lightsData
 	const float luminanceScale = light.fade;
 	if ((light.color.x + light.color.y + light.color.z) * luminanceScale > 1e-4 && light.radius > 1e-4) {
 		light.invRadius = 1.f / light.radius;
+		if (settings.EnableParticleLightsInverseSquare) {
+			light.lightFlags.set(LightFlags::InverseSquare);
+			light.fadeZone = 1.f / (light.radius * std::clamp(ISLMath::FadeZoneBase / light.radius, 0.f, 1.f));
+			light.sizeBias = ISLMath::ScaledUnitsSq * settings.ParticleLightsSize * settings.ParticleLightsSize * 0.5f;
+		}
 		lightsData.push_back(light);
 
 		if (cachedParticleLights.size() < MAX_LIGHTS) {
