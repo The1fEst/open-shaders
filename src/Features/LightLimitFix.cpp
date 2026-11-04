@@ -81,8 +81,10 @@ namespace
 		a_settings.MaxParticlesPerEmitter = std::clamp(a_settings.MaxParticlesPerEmitter, kMaxParticlesPerEmitterMin, kMaxParticlesPerEmitterMax);
 		a_settings.MaxParticleDistance =
 			Util::ClampFiniteOrDefault(a_settings.MaxParticleDistance, kMaxParticleDistanceMin, kMaxParticleDistanceMax, 6000.0f);
-		a_settings.JsonPlacedLightIntensity =
-			Util::ClampFiniteOrDefault(a_settings.JsonPlacedLightIntensity, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, 1.0f);
+		a_settings.JsonPlacedLightIntensityInterior =
+			Util::ClampFiniteOrDefault(a_settings.JsonPlacedLightIntensityInterior, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, 1.0f);
+		a_settings.JsonPlacedLightIntensityExterior =
+			Util::ClampFiniteOrDefault(a_settings.JsonPlacedLightIntensityExterior, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, 1.0f);
 		a_settings.LightAttachRefreshFrames = std::clamp(a_settings.LightAttachRefreshFrames, kLightAttachRefreshFramesMin, kLightAttachRefreshFramesMax);
 	}
 
@@ -159,8 +161,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ParticleClusterThreshold,
 	MaxParticlesPerEmitter,
 	MaxParticleDistance,
-	JsonPlacedLightIntensity,
-	JsonPlacedLightsInteriorsOnly,
+	JsonPlacedLightIntensityInterior,
+	JsonPlacedLightIntensityExterior,
 	JsonPlacedLightsPortalStrictOnly,
 	SkipRedundantLightAttach,
 	LightAttachRefreshFrames)
@@ -514,15 +516,24 @@ void LightLimitFix::DrawPlacedLightSettings()
 	ImGui::Spacing();
 
 	{
-		ImGui::SliderFloat(T("feature.light_limit_fix.json_intensity_scale", "Intensity Scale"), &settings.JsonPlacedLightIntensity, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, "%.2f");
+		ImGui::SliderFloat(T("feature.light_limit_fix.json_intensity_interior", "Interior Intensity Scale"), &settings.JsonPlacedLightIntensityInterior, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, "%.2f");
 		if (auto _tt = Util::HoverTooltipWrapper()) {
 			ImGui::Text("%s",
-				T("feature.light_limit_fix.json_intensity_scale_tooltip",
+				T("feature.light_limit_fix.json_intensity_interior_tooltip",
 					"Scales intensity for attached runtime lights generated from Light records.\n"
+					"Applies only in interior cells and sky-less worldspaces.\n"
 					"Primarily targets Light Placer-style JSON lights."));
 		}
 
-		ImGui::Checkbox(T("feature.light_limit_fix.json_interiors_only", "Interiors Only"), &settings.JsonPlacedLightsInteriorsOnly);
+		ImGui::SliderFloat(T("feature.light_limit_fix.json_intensity_exterior", "Exterior Intensity Scale"), &settings.JsonPlacedLightIntensityExterior, kJsonPlacedLightIntensityMin, kJsonPlacedLightIntensityMax, "%.2f");
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s",
+				T("feature.light_limit_fix.json_intensity_exterior_tooltip",
+					"Scales intensity for attached runtime lights generated from Light records.\n"
+					"Applies only in open exterior worldspaces.\n"
+					"Primarily targets Light Placer-style JSON lights."));
+		}
+
 		ImGui::Checkbox(T("feature.light_limit_fix.json_portal_strict_only", "Portal Strict Only"), &settings.JsonPlacedLightsPortalStrictOnly);
 	}
 }
@@ -1117,16 +1128,15 @@ void LightLimitFix::ApplyJsonPlacedLightIntensityScale(
 	bool a_isPortalStrict,
 	bool a_isInterior)
 {
-	if (std::abs(settings.JsonPlacedLightIntensity - 1.0f) <= 1e-4f)
-		return;
-	if (settings.JsonPlacedLightsInteriorsOnly && !a_isInterior)
+	const float intensity = a_isInterior ? settings.JsonPlacedLightIntensityInterior : settings.JsonPlacedLightIntensityExterior;
+	if (std::abs(intensity - 1.0f) <= 1e-4f)
 		return;
 	if (settings.JsonPlacedLightsPortalStrictOnly && !a_isPortalStrict)
 		return;
 	if (!IsJsonPlacedLight(a_bsLight, a_niLight))
 		return;
 
-	a_light.fade *= settings.JsonPlacedLightIntensity;
+	a_light.fade *= intensity;
 }
 
 void LightLimitFix::Prepass()

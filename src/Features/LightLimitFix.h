@@ -545,8 +545,8 @@ public:
 		float MaxParticleDistance = 6000.0f;
 
 		// JSON-placed light intensity (uses the light runtime metadata).
-		float JsonPlacedLightIntensity = 1.0f;
-		bool JsonPlacedLightsInteriorsOnly = false;
+		float JsonPlacedLightIntensityInterior = 1.0f;
+		float JsonPlacedLightIntensityExterior = 1.0f;
 		bool JsonPlacedLightsPortalStrictOnly = false;
 
 		// Light attach gate: skips the engine's per-frame attach walk for unchanged dynamic lights.
