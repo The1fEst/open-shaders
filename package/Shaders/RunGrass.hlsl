@@ -11,6 +11,7 @@
 #include "Common/MotionBlur.hlsli"
 #include "Common/NeuralRenderingCategory.hlsli"
 #include "Common/Permutation.hlsli"
+#include "Common/PointLightCompressor.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/ReverseZ.hlsli"
 #include "Common/SharedData.hlsli"
@@ -788,6 +789,8 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #				if defined(LIGHT_LIMIT_FIX)
 	uint clusterIndex = 0;
 	uint lightCount = 0;
+	DirectLightingOutput pointLighting = (DirectLightingOutput)0;
+	float3 pointLightIrradiance = 0;
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
 		if (lightCount) {
@@ -819,12 +822,17 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				[branch] if (SharedData::grassLightingSettings.EnableNewLightingModel)
 					PBR::GetDirectLightInputThinSurface(pointOutput, pointContext, material, grassSurface, pbrDetail, wrap);
 				else GrassLighting::GetLegacyPBRDirectLighting(pointOutput, pointContext, material, pbrDetail);
-				totalLighting.diffuse += pointOutput.diffuse;
-				totalLighting.specular += pointOutput.specular;
-				totalLighting.transmission += pointOutput.transmission;
+				pointLighting.diffuse += pointOutput.diffuse;
+				pointLighting.specular += pointOutput.specular;
+				pointLighting.transmission += pointOutput.transmission;
+				pointLightIrradiance += PointLightCompressor::GetIrradiance(lightColor) * lightShadow;
 			}
 		}
 	}
+	const float pointLightScale = PointLightCompressor::GetScale(pointLightIrradiance);
+	totalLighting.diffuse += pointLighting.diffuse * pointLightScale;
+	totalLighting.specular += pointLighting.specular * pointLightScale;
+	totalLighting.transmission += pointLighting.transmission * pointLightScale;
 #				endif
 
 	IndirectLobeWeights indirectLobes;
@@ -1211,6 +1219,10 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 #				if defined(LIGHT_LIMIT_FIX)
 	uint clusterIndex = 0;
 	uint lightCount = 0;
+	float3 pointLightsDiffuseColor = 0;
+	float3 pointLightsSpecularColor = 0;
+	float3 pointTransmissionRadiance = 0;
+	float3 pointLightIrradiance = 0;
 
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
@@ -1251,25 +1263,30 @@ PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFrontFace)
 				float3 normalizedLightDirection = normalize(lightDirection);
 
 				lightColor *= lightShadow * canopyVisibility * (useClumpOcclusion ? GrassLighting::GetClumpLightVisibility(clumpNormal, normalizedLightDirection) : 1.0);
+				pointLightIrradiance += PointLightCompressor::GetIrradiance(lightColor);
 
 				float NdotL = dot(normal, normalizedLightDirection);
 				float3 lightDiffuseColor, lightTransmissionColor;
 				GrassLighting::GetDirectLighting(albedo, reflectionAlbedo, frontTransmissionAlbedo, backTransmissionAlbedo, shineThroughAlbedo, grassOpacity, lightColor * Color::VanillaNormalization(),
 					NdotL, dot(viewDirection, normalizedLightDirection), SharedData::grassLightingSettings.EnableWrappedLighting ? wrapAmount : 0.0, 1.0, 1.0, lightDiffuseColor, lightTransmissionColor);
-				lightsDiffuseColor += lightDiffuseColor;
-				transmissionRadiance += lightTransmissionColor;
+				pointLightsDiffuseColor += lightDiffuseColor;
+				pointTransmissionRadiance += lightTransmissionColor;
 				[branch] if (SharedData::foliageLightingSettings.EnableGrassScattering != 0)
-					lightsDiffuseColor += albedo * lightColor * GetFoliageTransmission(NdotL, dot(viewDirection, normalizedLightDirection)) * Color::VanillaNormalization();
+					pointLightsDiffuseColor += albedo * lightColor * GetFoliageTransmission(NdotL, dot(viewDirection, normalizedLightDirection)) * Color::VanillaNormalization();
 
 #					ifdef GRASS_OPTIMIZATIONS
 				if (complexDetail)
 #					else
 				if (complex)
 #					endif
-					lightsSpecularColor += GrassLighting::GetLightSpecularInput(normalizedLightDirection, viewDirection, specularNormal, lightColor, roughness, F0) * Color::VanillaNormalization();
+					pointLightsSpecularColor += GrassLighting::GetLightSpecularInput(normalizedLightDirection, viewDirection, specularNormal, lightColor, roughness, F0) * Color::VanillaNormalization();
 			}
 		}
 	}
+	const float pointLightScale = PointLightCompressor::GetScale(pointLightIrradiance);
+	lightsDiffuseColor += pointLightsDiffuseColor * pointLightScale;
+	lightsSpecularColor += pointLightsSpecularColor * pointLightScale;
+	transmissionRadiance += pointTransmissionRadiance * pointLightScale;
 #				endif  // LIGHT_LIMIT_FIX
 
 	diffuseColor += lightsDiffuseColor;
@@ -1439,6 +1456,7 @@ PS_OUTPUT main(PS_INPUT input)
 #			if defined(LIGHT_LIMIT_FIX)
 	uint clusterIndex = 0;
 	uint lightCount = 0;
+	float3 pointLightsDiffuseColor = 0;
 
 	if (LightLimitFix::GetClusterIndex(screenUV, viewPosition.z, clusterIndex)) {
 		lightCount = LightLimitFix::lightGrid[clusterIndex].lightCount;
@@ -1477,10 +1495,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 				lightColor *= lightShadow;
 
-				diffuseColor += lightColor;
+				pointLightsDiffuseColor += lightColor;
 			}
 		}
 	}
+	diffuseColor += pointLightsDiffuseColor * PointLightCompressor::GetScale(PointLightCompressor::GetIrradiance(pointLightsDiffuseColor));
 #			endif  // LIGHT_LIMIT_FIX
 
 #			ifdef GRASS_OPTIMIZATIONS

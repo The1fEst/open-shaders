@@ -49,11 +49,19 @@ namespace
 	constexpr float kMaxParticleDistanceMax = 20000.0f;
 	constexpr float kJsonPlacedLightIntensityMin = 0.0f;
 	constexpr float kJsonPlacedLightIntensityMax = 8.0f;
+	constexpr float kCombinedLightThresholdMin = 0.0f;
+	constexpr float kCombinedLightThresholdMax = 16.0f;
+	constexpr float kCombinedLightRatioMin = 1.0f;
+	constexpr float kCombinedLightRatioMax = 20.0f;
 	constexpr int kLightAttachRefreshFramesMin = 1;
 	constexpr int kLightAttachRefreshFramesMax = 600;
 
 	void SanitizeSettings(LightLimitFix::Settings& a_settings)
 	{
+		a_settings.CombinedLightThreshold =
+			Util::ClampFiniteOrDefault(a_settings.CombinedLightThreshold, kCombinedLightThresholdMin, kCombinedLightThresholdMax, 0.0f);
+		a_settings.CombinedLightRatio =
+			Util::ClampFiniteOrDefault(a_settings.CombinedLightRatio, kCombinedLightRatioMin, kCombinedLightRatioMax, 4.0f);
 		a_settings.ParticleLightsSaturation =
 			Util::ClampFiniteOrDefault(a_settings.ParticleLightsSaturation, kParticleLightsSaturationMin, kParticleLightsSaturationMax, 1.0f);
 		a_settings.ParticleBrightness =
@@ -131,6 +139,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	ShadowSettings,
 	EnableParticleContactShadows,
 	SunLitHair,
+	CombinedLightThreshold,
+	CombinedLightRatio,
 	EnableParticleLights,
 	EnableParticleLightsCulling,
 	EnableParticleLightsDetection,
@@ -270,6 +280,18 @@ void LightLimitFix::DrawSettings()
 
 	if (Util::BeginPillTabItem(T("feature.light_limit_fix.placed_lights_json_header", "Placed Lights (JSON)"))) {
 		DrawPlacedLightSettings();
+		Util::EndPillTabItem();
+	}
+
+	if (Util::BeginPillTabItem(T("feature.light_limit_fix.combined_lights_header", "Combined Lights"))) {
+		ImGui::SliderFloat(T("feature.light_limit_fix.combined_light_threshold", "Threshold"), &settings.CombinedLightThreshold, kCombinedLightThresholdMin, kCombinedLightThresholdMax, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T("feature.light_limit_fix.combined_light_threshold_tooltip", "Brightness at which the point lights summed on one surface start to be compressed, so many sources or an open fire stop overexposing a room. Light below this is unchanged. The sun is not compressed. 0 turns compression off."));
+		}
+		ImGui::SliderFloat(T("feature.light_limit_fix.combined_light_ratio", "Ratio"), &settings.CombinedLightRatio, kCombinedLightRatioMin, kCombinedLightRatioMax, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+		if (auto _tt = Util::HoverTooltipWrapper()) {
+			ImGui::Text("%s", T("feature.light_limit_fix.combined_light_ratio_tooltip", "Stops of added light needed above the threshold to raise the result by one stop. Higher values compress harder without a ceiling and keep color. 1 turns compression off."));
+		}
 		Util::EndPillTabItem();
 	}
 
@@ -567,6 +589,8 @@ LightLimitFix::PerFrame LightLimitFix::GetCommonBufferData()
 	perFrame.ShadowMapSlots = ShadowCasterManager::GetInstalledSlotCount();
 	perFrame.SunLitHair = settings.SunLitHair ? 1u : 0u;
 	perFrame.EnableParticleContactShadows = settings.EnableContactShadows && settings.EnableParticleContactShadows;
+	perFrame.CombinedLightThreshold = sanitizeFloat(settings.CombinedLightThreshold, kCombinedLightThresholdMin, kCombinedLightThresholdMax);
+	perFrame.CombinedLightRatio = sanitizeFloat(settings.CombinedLightRatio, kCombinedLightRatioMin, kCombinedLightRatioMax);
 	std::copy(clusterSize, clusterSize + 3, perFrame.ClusterSize);
 	perFrame.EnableLightsVisualisation = EnableLightsVisualisation;
 	perFrame.LightsVisualisationMode = LightsVisualisationMode;

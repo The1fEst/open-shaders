@@ -1156,6 +1156,7 @@ float3 GetSunColor(float3 normal, float3 viewDirection, float3 worldPosition, ui
 
 #		if defined(LIGHT_LIMIT_FIX)
 #			include "LightLimitFix/LightLimitFix.hlsli"
+#			include "Common/PointLightCompressor.hlsli"
 #		endif
 
 #		if defined(IBL)
@@ -1362,6 +1363,7 @@ PS_OUTPUT main(PS_INPUT input)
 			contactShadowSteps = round(SharedData::lightLimitFixSettings.ContactShadowMaxSteps *
 									   (1.0 - saturate(viewPosition.z / SharedData::lightLimitFixSettings.ContactShadowMaxDistance)));
 
+		float3 pointLightIrradiance = 0.0;
 		[loop] for (uint i = 0; i < lightCount; i++)
 		{
 			uint clusteredLightIndex = LightLimitFix::lightList[lightOffset + i];
@@ -1405,9 +1407,11 @@ PS_OUTPUT main(PS_INPUT input)
 			}
 
 			const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
-			float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear, light.lightFlags) * pow(HdotN, FresnelRI.z) * light.fade;
-			specularLighting += lightColor * intensityMultiplier * lightShadow;
+			float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear, light.lightFlags) * intensityMultiplier * light.fade * lightShadow;
+			pointLightIrradiance += PointLightCompressor::GetIrradiance(lightColor);
+			specularLighting += lightColor * pow(HdotN, FresnelRI.z);
 		}
+		specularLighting *= PointLightCompressor::GetScale(pointLightIrradiance);
 	}
 	specularColor += specularLighting * 3;
 #				endif

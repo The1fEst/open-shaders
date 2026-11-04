@@ -382,6 +382,7 @@ cbuffer PerGeometry : register(b2)
 
 #	if defined(LIGHT_LIMIT_FIX)
 #		include "LightLimitFix/LightLimitFix.hlsli"
+#		include "Common/PointLightCompressor.hlsli"
 #	endif
 
 #	include "Common/DirectionalShadow.hlsli"
@@ -524,6 +525,7 @@ void AddPointLighting(float3 positionWS, uint eyeIndex, ParticleSurface surface,
 	[branch] if (scale > 0.0 && GetLightCluster(positionWS, eyeIndex, lightOffset, lightCount))
 	{
 		float3 pointLighting = 0.0;
+		float3 pointLightIrradiance = 0.0;
 		[loop] for (uint i = 0; i < lightCount; i++)
 		{
 			LightLimitFix::Light light = LightLimitFix::lights[LightLimitFix::lightList[lightOffset + i]];
@@ -533,9 +535,11 @@ void AddPointLighting(float3 positionWS, uint eyeIndex, ParticleSurface surface,
 			float3 lightDirection;
 			float intensity = GetPointLightIntensity(light, positionWS, eyeIndex, lightDirection);
 			const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
-			pointLighting += ShadeLight(surface, Color::PointLight(light.color.xyz, isPointLightLinear, light.lightFlags), intensity, lightDirection);
+			float3 lightColor = Color::PointLight(light.color.xyz, isPointLightLinear, light.lightFlags);
+			pointLighting += ShadeLight(surface, lightColor, intensity, lightDirection);
+			pointLightIrradiance += PointLightCompressor::GetIrradiance(lightColor) * intensity;
 		}
-		lighting += pointLighting * scale;
+		lighting += pointLighting * (scale * PointLightCompressor::GetScale(pointLightIrradiance));
 	}
 #	endif
 }

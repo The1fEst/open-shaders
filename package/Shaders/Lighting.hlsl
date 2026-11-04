@@ -14,6 +14,7 @@
 #include "Common/MotionBlur.hlsli"
 #include "Common/NeuralRenderingCategory.hlsli"
 #include "Common/Permutation.hlsli"
+#include "Common/PointLightCompressor.hlsli"
 #include "Common/Random.hlsli"
 #include "Common/ReverseZ.hlsli"
 #include "Common/Shading.hlsli"
@@ -3543,6 +3544,17 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	}
 #			endif
 
+	float3 pointLightsDiffuseColor = 0.0.xxx;
+	float3 pointLightsSpecularColor = 0.0.xxx;
+#			if defined(TRUE_PBR)
+	float3 pointCoatLightsDiffuseColor = 0.0.xxx;
+#			endif
+	float3 pointTransmissionColor = 0.0.xxx;
+	float3 pointLightIrradiance = 0.0.xxx;
+#			if defined(CHARACTER_RAIN_SURFACE)
+	float3 pointCharacterRainSpecular = 0.0f;
+#			endif
+
 	[loop] for (uint lightIndex = 0; lightIndex < totalLightCount; lightIndex++)
 	{
 		LightLimitFix::Light light;
@@ -3690,18 +3702,38 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 			EvaluateWetnessLighting(wetnessNormal, pointLightContext, waterRoughnessSpecular, pointLightOutput);
 #				if defined(CHARACTER_RAIN_SURFACE)
 		[branch] if (characterCoatMask > 0.0f)
-			characterRainSpecular += CharacterRainSpots::EvaluateLighting(characterSpotSurfaceNormal, pointLightContext,
+			pointCharacterRainSpecular += CharacterRainSpots::EvaluateLighting(characterSpotSurfaceNormal, pointLightContext,
 				characterSpotRoughness, characterCoatMask, characterCoatIntensity);
 #				endif
 #			endif
 
-		lightsDiffuseColor += pointLightOutput.diffuse;
-		lightsSpecularColor += pointLightOutput.specular;
+		pointLightsDiffuseColor += pointLightOutput.diffuse;
+		pointLightsSpecularColor += pointLightOutput.specular;
 #			if defined(TRUE_PBR)
-		coatLightsDiffuseColor += pointLightOutput.coatDiffuse;
+		pointCoatLightsDiffuseColor += pointLightOutput.coatDiffuse;
 #			endif
-		transmissionColor += pointLightOutput.transmission;
+		pointTransmissionColor += pointLightOutput.transmission;
+
+		float lightCosine = saturate(lightAngle);
+#			if defined(CS_HAIR_SHADING) || defined(TREE_ANIM)
+		lightCosine = 1.0;
+#			elif defined(TRUE_PBR) && !defined(LANDSCAPE) && !defined(LODLANDSCAPE)
+		[branch] if ((PBRFlags & PBR::Flags::HairMarschner) != 0)
+			lightCosine = 1.0;
+#			endif
+		pointLightIrradiance += PointLightCompressor::GetIrradiance(lightColor) * (pointLightShadow * lightCosine);
 	}
+
+	const float pointLightScale = PointLightCompressor::GetScale(pointLightIrradiance);
+	lightsDiffuseColor += pointLightsDiffuseColor * pointLightScale;
+	lightsSpecularColor += pointLightsSpecularColor * pointLightScale;
+#			if defined(TRUE_PBR)
+	coatLightsDiffuseColor += pointCoatLightsDiffuseColor * pointLightScale;
+#			endif
+	transmissionColor += pointTransmissionColor * pointLightScale;
+#			if defined(CHARACTER_RAIN_SURFACE)
+	characterRainSpecular += pointCharacterRainSpecular * pointLightScale;
+#			endif
 #		endif
 #	endif
 

@@ -151,7 +151,9 @@ public:
 		uint EnableLightsVisualisation;
 		uint LightsVisualisationMode;
 		uint EnableParticleContactShadows;
-		uint pad1;
+		float CombinedLightThreshold;
+		float CombinedLightRatio;
+		float pad[3];
 	};
 	STATIC_ASSERT_ALIGNAS_16(PerFrame);
 	// Compile-time size lock catches CPU/GPU cbuffer layout drift. STATIC_ASSERT_ALIGNAS_16
@@ -161,7 +163,7 @@ public:
 	// SharedData::LightLimitFixSettings in package/Shaders/Common/SharedData.hlsli
 	// (embedded in the shared FeatureData cbuffer at b6), and must match this layout
 	// field-for-field. Update both sides when the layout changes, then bump this constant.
-	static_assert(sizeof(PerFrame) == 64,
+	static_assert(sizeof(PerFrame) == 80,
 		"LightLimitFix::PerFrame layout drifted -- update SharedData::LightLimitFixSettings in package/Shaders/Common/SharedData.hlsli to match, then update this assert.");
 
 	/** @brief Populates and returns the per-frame constant buffer data for light visualization settings. */
@@ -518,6 +520,12 @@ public:
 
 		/// Hair takes the directional shadow the deferred pass computed instead of the engine's cheaper forward lookup, so it is lit by the sun like the rest of the scene.
 		bool SunLitHair = true;
+
+		/// Per-pixel point-light irradiance, on its brightest color component, above which compression starts; 0 turns it off.
+		float CombinedLightThreshold = 0.0f;
+
+		/// Stops of input light per stop of output above the threshold; 1 leaves the light unchanged.
+		float CombinedLightRatio = 4.0f;
 
 		// Particle Lights.
 		bool EnableParticleLights = true;

@@ -547,6 +547,7 @@ cbuffer PerGeometry : register(b2)
 
 #	if defined(LIGHT_LIMIT_FIX)
 #		include "LightLimitFix/LightLimitFix.hlsli"
+#		include "Common/PointLightCompressor.hlsli"
 #	endif
 
 static const float EffectDirectionalLightScale = 0.5;
@@ -1097,6 +1098,8 @@ PS_OUTPUT ShadeEffect(PS_INPUT input, bool sampleDistantShadow)
 	float pointLightingScale = 1.0;
 #			endif
 
+	float3 pointLightColor = 0.0;
+	float3 pointLightIrradiance = 0.0;
 	[loop] for (uint i = 0; i < totalLightCount; i++)
 	{
 		LightLimitFix::Light light;
@@ -1126,9 +1129,12 @@ PS_OUTPUT ShadeEffect(PS_INPUT input, bool sampleDistantShadow)
 			continue;
 
 		const bool isPointLightLinear = light.lightFlags & LightLimitFix::LightFlags::Linear;
-		float3 lightColor = Color::EffectPointLight(light.color.xyz, isPointLightLinear, light.lightFlags) * intensityMultiplier * 0.5 * light.fade;
-		propertyColor += lightColor * pointLightingScale;
+		float3 lightColor = Color::EffectPointLight(light.color.xyz, isPointLightLinear, light.lightFlags) * intensityMultiplier * light.fade;
+		// EffectPointLight has no pi factor, so unlike Color::PointLight it needs no PointLightCompressor::GetIrradiance.
+		pointLightIrradiance += lightColor;
+		pointLightColor += lightColor * (0.5 * pointLightingScale);
 	}
+	propertyColor += pointLightColor * PointLightCompressor::GetScale(pointLightIrradiance);
 
 #		endif
 	propertyColor = Color::EffectLightToGamma(propertyColor);
