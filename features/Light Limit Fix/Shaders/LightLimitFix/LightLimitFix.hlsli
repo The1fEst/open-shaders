@@ -12,6 +12,7 @@ namespace LightLimitFix
 
 	// Shadow Radius for PCF
 	static const float PCFRadius2D = 0.002;
+	static const float MinFarCascadePCFRadius = 0.0005;
 
 	cbuffer StrictLightData : register(b3)
 	{
@@ -311,11 +312,17 @@ namespace LightLimitFix
 		llfCoverage = 1.0 - fadeFactor;
 
 		// Compute cascade blend factor
-		float cascadeSelect = smoothstep(shadowLightData.StartSplitDistances.y, shadowLightData.EndSplitDistances.x, shadowMapDepth);
+		float blendStart = ShadowCoverage::GetCascadeBlendStart(shadowLightData.StartSplitDistances.y, shadowLightData.EndSplitDistances.x);
+		float cascadeSelect = smoothstep(blendStart, shadowLightData.EndSplitDistances.x, shadowMapDepth);
 
 		// Determine which cascade(s) to sample
-		uint primaryCascade = cascadeSelect;
+		uint primaryCascade = ShadowCoverage::GetPrimaryCascade(cascadeSelect);
 		bool needsBlending = (cascadeSelect > 0.0) && (cascadeSelect < 1.0);
+
+		float nearUVPerUnit = length(shadowLightData.ShadowProj[0][0].xyz);
+		float farUVPerUnit = length(shadowLightData.ShadowProj[1][0].xyz);
+		float farCascadeRadius = clamp(PCFRadius2D * farUVPerUnit / max(nearUVPerUnit, EPSILON_DIVISION), MinFarCascadePCFRadius, PCFRadius2D);
+		float2 cascadeRadius = float2(PCFRadius2D, farCascadeRadius);
 
 		// Transform ray to light space for primary cascade
 		float3 positionLS = mul(shadowLightData.ShadowProj[primaryCascade], float4(worldPositionWS, 1)).xyz;
@@ -327,7 +334,7 @@ namespace LightLimitFix
 		[loop] for (int i = 0; i < 8; i++)
 		{
 			float2 sampleOffset = mul(Random::SpiralSampleOffsets8[i], rotationMatrix);
-			float2 sampleUV = positionLS.xy + sampleOffset * PCFRadius2D;
+			float2 sampleUV = positionLS.xy + sampleOffset * cascadeRadius[primaryCascade];
 			shadow += dot(float4(DirectionalShadowCascades.GatherRed(LinearSampler, float3(saturate(sampleUV), primaryCascade)) > positionLS.z), 0.25);
 		}
 
@@ -346,7 +353,7 @@ namespace LightLimitFix
 			[loop] for (int i = 0; i < 8; i++)
 			{
 				float2 sampleOffset = mul(Random::SpiralSampleOffsets8[i], rotationMatrix);
-				float2 sampleUV = positionLS.xy + sampleOffset * PCFRadius2D;
+				float2 sampleUV = positionLS.xy + sampleOffset * cascadeRadius[secondaryCascade];
 				shadowBlend += dot(float4(DirectionalShadowCascades.GatherRed(LinearSampler, float3(saturate(sampleUV), secondaryCascade)) > positionLS.z), 0.25);
 			}
 

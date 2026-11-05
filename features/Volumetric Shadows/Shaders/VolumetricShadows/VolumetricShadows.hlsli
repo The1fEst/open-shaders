@@ -1,6 +1,8 @@
 #ifndef __VOLUMETRIC_SHADOWS_HLSLI__
 #define __VOLUMETRIC_SHADOWS_HLSLI__
 
+#include "Common/ShadowCoverage.hlsli"
+
 // Variance Shadow Maps (VSM)
 // Chebyshev's inequality on filtered depth moments
 
@@ -82,10 +84,11 @@ namespace VolumetricShadows
 		float rcpSampleCount = rcp(sampleCount);
 
 		// Compute cascade blend factor
-		float cascadeSelect = saturate((shadowMapDepth - directionalShadowLightData.StartSplitDistances.y) / (directionalShadowLightData.EndSplitDistances.x - directionalShadowLightData.StartSplitDistances.y));
+		float blendStart = ShadowCoverage::GetCascadeBlendStart(directionalShadowLightData.StartSplitDistances.y, directionalShadowLightData.EndSplitDistances.x);
+		float cascadeSelect = saturate((shadowMapDepth - blendStart) / (directionalShadowLightData.EndSplitDistances.x - blendStart));
 
 		// Determine which cascade(s) to sample
-		uint primaryCascade = uint(cascadeSelect);
+		uint primaryCascade = ShadowCoverage::GetPrimaryCascade(cascadeSelect);
 		bool needsBlending = (cascadeSelect > 0.0) && (cascadeSelect < 1.0);
 
 		// Transform ray to light space for primary cascade
@@ -147,10 +150,11 @@ namespace VolumetricShadows
 		float fade = saturate(shadowMapDepth / directionalShadowLightData.EndSplitDistances.y);
 
 		// Compute cascade blend factor with smoothstep
-		float cascadeSelect = saturate((shadowMapDepth - directionalShadowLightData.StartSplitDistances.y) / (directionalShadowLightData.EndSplitDistances.x - directionalShadowLightData.StartSplitDistances.y));
+		float blendStart = ShadowCoverage::GetCascadeBlendStart(directionalShadowLightData.StartSplitDistances.y, directionalShadowLightData.EndSplitDistances.x);
+		float cascadeSelect = saturate((shadowMapDepth - blendStart) / (directionalShadowLightData.EndSplitDistances.x - blendStart));
 
 		// Determine which cascade(s) to sample
-		uint primaryCascade = uint(cascadeSelect);
+		uint primaryCascade = ShadowCoverage::GetPrimaryCascade(cascadeSelect);
 		bool needsBlending = (cascadeSelect > 0.0) && (cascadeSelect < 1.0);
 
 		// Transform position to light space for primary cascade

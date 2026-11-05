@@ -9,6 +9,7 @@ RWTexture3D<float4> LightScattering : register(u0);
 
 #include "Common/Math.hlsli"
 #include "Common/Random.hlsli"
+#include "Common/ShadowCoverage.hlsli"
 #include "ExponentialHeightFog/VolumetricFogCSCommon.hlsli"
 
 #include "Common/ShadowSampling.hlsli"
@@ -166,7 +167,7 @@ float SampleDirectionalShadow(float3 positionWS, uint eyeIndex)
 
 	float splitDenom = max(directionalShadowLightData.EndSplitDistances.x - directionalShadowLightData.StartSplitDistances.y, 1e-4f);
 	float cascadeSelect = smoothstep(0.0f, 1.0f, saturate((shadowMapDepth - directionalShadowLightData.StartSplitDistances.y) / splitDenom));
-	uint primaryCascade = (uint)cascadeSelect;
+	uint primaryCascade = ShadowCoverage::GetPrimaryCascade(cascadeSelect);
 
 	float3 absolutePositionWS = positionWS + FrameBuffer::CameraPosAdjust[eyeIndex].xyz;
 	float3 positionLS = mul(directionalShadowLightData.ShadowProj[primaryCascade], float4(absolutePositionWS, 1.0f)).xyz;
