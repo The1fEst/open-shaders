@@ -2255,7 +2255,11 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 	baseColor = float4(Color::Diffuse(rawBaseColor.rgb), rawBaseColor.a);
 	worldNormal.xyz = projectedNormal;
 #		elif !defined(FACEGEN) && !defined(MULTI_LAYER_PARALLAX) && !defined(PARALLAX) && !defined(SPARKLE)
-	if (ProjectedUVParams3.w > 0.5) {
+	// Some draws of this permutation receive the MultiIndexSparkle layout in this register: normal dampener in x,
+	// 1 / material UV scale in y, and z holding whatever the constant buffer contained before. Authored material
+	// colors stay within [0, 1] and their green is never between 0 and 0.02, where 1 / UV scale lands for UV scales above 50.
+	const bool hasProjectedTint = all(saturate(ProjectedUVParams2.xyz) == ProjectedUVParams2.xyz) && !(ProjectedUVParams2.y > 0.0 && ProjectedUVParams2.y < 0.02);
+	if (hasProjectedTint && ProjectedUVParams3.w > 0.5) {
 		float diffuseNormalScale = ProjectedUVParams3.x * ProjectedUVParams.z;
 		float3 projNormal = TransformNormal(Triplanar::SampleStochastic(TexProjNormalSampler, SampProjNormalSampler, projWorldPos, triWeights, diffuseNormalScale, screenNoise).xyz);
 		float detailNormalScale = ProjectedUVParams3.y * ProjectedUVParams.z;
@@ -2287,7 +2291,7 @@ FUR_EARLY_DEPTH_STENCIL PS_OUTPUT main(PS_INPUT input, bool frontFace : SV_IsFro
 		useSnowDecalSpecular = true;
 #			endif  // SNOW
 	} else {
-		if (projWeight > 0) {
+		if (hasProjectedTint && projWeight > 0) {
 			baseColor.xyz = Color::AuthoredColor(ProjectedUVParams2.xyz);
 #			if !defined(TRUE_PBR)
 			baseColor.xyz = Color::EnbColorPow(baseColor.xyz);
