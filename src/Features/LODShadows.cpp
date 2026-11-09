@@ -1,6 +1,7 @@
 #include "LODShadows.h"
 
 #include <bit>
+#include <numeric>
 
 #include "Globals.h"
 #include "GpuPass.h"
@@ -25,7 +26,6 @@ namespace
 	constexpr int kRasterDepthBias = 1;
 	constexpr float kTerrainSlopeScaledDepthBias = 1.0f;
 	constexpr uint32_t kCollectIntervalFrames = 4;
-	constexpr uint32_t kFullWalkIntervalScans = 8;
 	constexpr uint64_t kHashSeed = 14695981039346656037ull;
 	constexpr uint64_t kHashPrime = 1099511628211ull;
 
@@ -326,7 +326,9 @@ void LODShadows::Invalidate()
 		map.valid = false;
 	casters.clear();
 	visibleGeometry.clear();
-	loadedRefCache.clear();
+	hasLoadedGeometry = false;
+	geometryCounts = {};
+	framesSinceCollect = kCollectIntervalFrames;
 	terrainGeometryCount = 0;
 	terrainAvailable = false;
 	pendingIndex = -1;
@@ -542,12 +544,13 @@ void LODShadows::CollectTerrain()
 	HashBytes(sceneHash, &landBounds, sizeof(landBounds));
 }
 
-void LODShadows::CollectLoadedObjects(bool a_fullWalk)
+void LODShadows::CollectLoadedObjects()
 {
-	collectedGeometry.clear();
+	sceneHash = kHashSeed;
 	const auto lodGeometryCount = visibleGeometry.size();
-	bool lodGeometrySeeded = false;
-	++loadedScanId;
+	collectedGeometry.clear();
+	for (const auto& geometry : visibleGeometry)
+		collectedGeometry.insert(geometry);
 	if (auto* tes = globals::game::tes) {
 		tes->ForEachReference([&](RE::TESObjectREFR* reference) {
 			const auto* base = reference ? reference->GetBaseObject() : nullptr;
@@ -555,33 +558,14 @@ void LODShadows::CollectLoadedObjects(bool a_fullWalk)
 			if (!base || !base->Is(RE::FormType::Static, RE::FormType::StaticCollection, RE::FormType::Tree) ||
 				(staticObject && staticObject->IsSkyObject()) || reference->IsDisabled() || reference->IsDeleted())
 				return RE::BSContainer::ForEachResult::kContinue;
-			auto* root = reference->Get3D();
-			if (!root)
-				return RE::BSContainer::ForEachResult::kContinue;
-			auto& entry = loadedRefCache[reference];
-			entry.scanId = loadedScanId;
-			const bool culled = root->GetAppCulled();
-			if (!a_fullWalk && entry.root.get() == root && entry.culled == culled) {
-				for (const auto& geometry : entry.geometry) {
-					visibleGeometry.emplace_back(geometry);
-					HashGeometry(geometry.get());
-				}
-				return RE::BSContainer::ForEachResult::kContinue;
-			}
-			if (!lodGeometrySeeded) {
-				for (size_t i = 0; i < lodGeometryCount; ++i)
-					collectedGeometry.insert(visibleGeometry[i].get());
-				lodGeometrySeeded = true;
-			}
-			const auto first = visibleGeometry.size();
-			Collect(root, false, true);
-			entry.root.reset(root);
-			entry.culled = culled;
-			entry.geometry.assign(visibleGeometry.begin() + first, visibleGeometry.end());
+			Collect(reference->Get3D(), false, true);
 			return RE::BSContainer::ForEachResult::kContinue;
 		});
 	}
-	std::erase_if(loadedRefCache, [this](const auto& item) { return item.second.scanId != loadedScanId; });
+	sourceHashes[3] = sceneHash;
+	geometryCounts[3] = uint32_t(visibleGeometry.size() - lodGeometryCount);
+	hasLoadedGeometry = true;
+	framesSinceCollect = 0;
 }
 
 void LODShadows::AddCaster(RE::BSGeometry* a_geometry)
@@ -603,7 +587,6 @@ void LODShadows::AddCaster(RE::BSGeometry* a_geometry)
 	}
 	Caster caster;
 	caster.lodLandscape = property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kLODLandscape);
-	caster.geometry.reset(a_geometry);
 	caster.vertices.copy_from(Util::AsReal(mesh->vertexBuffer));
 	caster.indices.copy_from(Util::AsReal(mesh->indexBuffer));
 	caster.vertexDescriptor = std::bit_cast<uint64_t>(data.vertexDesc);
@@ -734,7 +717,7 @@ void LODShadows::BeginMap(uint32_t a_index, const RE::NiPoint3& a_center, const 
 	float extent = kMinimumHalfExtents[a_index];
 	if (a_index == kMapCount - 1) {
 		for (const auto& geometry : visibleGeometry) {
-			ForEachCasterBound(geometry.get(), [&](const RE::NiBound& bound) {
+			ForEachCasterBound(geometry, [&](const RE::NiBound& bound) {
 				const auto offset = bound.center - a_center;
 				const auto point = XMVector3TransformNormal(XMVectorSet(offset.x, offset.y, offset.z, 0), rotation);
 				const float requiredExtent = std::max(std::abs(XMVectorGetX(point)), std::abs(XMVectorGetY(point))) + bound.radius;
@@ -749,7 +732,7 @@ void LODShadows::BeginMap(uint32_t a_index, const RE::NiPoint3& a_center, const 
 	float depthNear = -kCellSize;
 	float depthFar = kCellSize;
 	for (const auto& geometry : visibleGeometry) {
-		ForEachCasterBound(geometry.get(), [&](const RE::NiBound& bound) {
+		ForEachCasterBound(geometry, [&](const RE::NiBound& bound) {
 			const auto offset = bound.center - a_center;
 			const auto point = XMVector3TransformNormal(XMVectorSet(offset.x, offset.y, offset.z, 0), rotation);
 			const float x = XMVectorGetX(point) + XMVectorGetX(center) - centerX;
@@ -778,7 +761,7 @@ void LODShadows::BeginMap(uint32_t a_index, const RE::NiPoint3& a_center, const 
 	for (uint32_t i = 0; i < visibleGeometry.size(); ++i) {
 		const auto unsupported = unsupportedCasters;
 		const auto firstCaster = casters.size();
-		AddCaster(visibleGeometry[i].get());
+		AddCaster(visibleGeometry[i]);
 		for (size_t caster = firstCaster; caster < casters.size(); ++caster) {
 			const auto& bound = casters[caster].bound;
 			casters[caster].nativeShadowCaster = i >= loadedObjectStart && nativeDistance > 0.0f &&
@@ -865,7 +848,6 @@ void LODShadows::UpdateMaps(const RE::NiPoint3& a_center, const RE::NiPoint3& a_
 	if (query.pending && !a_refreshImmediately)
 		return;
 	if (!a_refreshImmediately && pendingIndex < 0) {
-		RE::BSSpinLockGuard lock(RE::BGSTerrainManager::GetCameraTerrainLock());
 		std::array<uint32_t, kMapCount> candidates{};
 		uint32_t candidateCount = 0;
 		std::array<double, kMapCount> deadlines{};
@@ -891,6 +873,12 @@ void LODShadows::UpdateMaps(const RE::NiPoint3& a_center, const RE::NiPoint3& a_
 			const double workloadTimeMs = std::ceil(double(map.triangleCount) / batchTriangles) * frameDurationMs;
 			buildTimeMs += std::max(map.buildDurationMs, workloadTimeMs) + frameDurationMs;
 			if (frameTimeMs + buildTimeMs >= deadlines[index]) {
+				if (!hasLoadedGeometry) {
+					CollectLoadedObjects();
+					sceneHash = kHashSeed;
+					HashBytes(sceneHash, sourceHashes.data(), sizeof(sourceHashes));
+				}
+				RE::BSSpinLockGuard lock(RE::BGSTerrainManager::GetCameraTerrainLock());
 				BeginMap(candidates[0], a_center, a_direction);
 				break;
 			}
@@ -1174,7 +1162,7 @@ void LODShadows::Publish()
 json LODShadows::BuildDiagnostics() const
 {
 	json diagnostics = { { "ready", ready }, { "enabled", settings.Enabled }, { "validMaps", publishedValidMaps }, { "completedMaps", completedMaps },
-		{ "geometryCount", visibleGeometry.size() }, { "pendingCasters", casters.size() - casterIndex * (pendingIndex >= 0) }, { "unsupportedCasters", unsupportedCasters },
+		{ "geometryCount", std::accumulate(geometryCounts.begin(), geometryCounts.end(), 0u) }, { "pendingCasters", casters.size() - casterIndex * (pendingIndex >= 0) }, { "unsupportedCasters", unsupportedCasters },
 		{ "updateDraws", lastDraws }, { "updateTriangles", lastTriangles }, { "triangleBudget", updateBudget.Triangles() },
 		{ "lastUpdateGpuMs", lastUpdateMs }, { "maxUpdateGpuMs", maxUpdateMs }, { "timingSamples", timingSamples },
 		{ "lastFullRefreshGpuMs", lastRefreshMs }, { "maxFullRefreshGpuMs", maxRefreshMs }, { "refreshEveryFrame", refreshEveryFrame } };
@@ -1236,11 +1224,8 @@ void LODShadows::ReflectionsPrepass()
 	Publish();
 }
 
-void LODShadows::CollectScene(bool a_refreshLoaded, bool a_fullWalk)
+void LODShadows::CollectScene(bool a_refreshLoaded)
 {
-	loadedGeometry.clear();
-	if (!a_refreshLoaded && geometryCounts[3] <= visibleGeometry.size())
-		loadedGeometry.assign(std::make_move_iterator(visibleGeometry.end() - geometryCounts[3]), std::make_move_iterator(visibleGeometry.end()));
 	sceneHash = kHashSeed;
 	visibleGeometry.clear();
 	{
@@ -1257,16 +1242,9 @@ void LODShadows::CollectScene(bool a_refreshLoaded, bool a_fullWalk)
 		sourceHashes[2] = sceneHash;
 		geometryCounts[2] = uint32_t(visibleGeometry.size()) - geometryCounts[0] - geometryCounts[1];
 	}
-	if (a_refreshLoaded) {
-		sceneHash = kHashSeed;
-		const auto lodGeometryCount = visibleGeometry.size();
-		CollectLoadedObjects(a_fullWalk);
-		sourceHashes[3] = sceneHash;
-		geometryCounts[3] = uint32_t(visibleGeometry.size() - lodGeometryCount);
-	} else {
-		visibleGeometry.insert(visibleGeometry.end(), std::make_move_iterator(loadedGeometry.begin()), std::make_move_iterator(loadedGeometry.end()));
-		loadedGeometry.clear();
-	}
+	hasLoadedGeometry = false;
+	if (a_refreshLoaded)
+		CollectLoadedObjects();
 	sceneHash = kHashSeed;
 	HashBytes(sceneHash, sourceHashes.data(), sizeof(sourceHashes));
 }
@@ -1327,19 +1305,15 @@ void LODShadows::EarlyPrepass()
 		const auto* tes = globals::game::tes;
 		const int32_t gridX = tes ? tes->currentGridX : 0;
 		const int32_t gridY = tes ? tes->currentGridY : 0;
-		const bool refreshLoaded = !throttleCollect || refreshImmediately || visibleGeometry.empty() || gridX != collectedGridX ||
+		const bool refreshLoaded = !throttleCollect || refreshImmediately || gridX != collectedGridX ||
 		                           gridY != collectedGridY || ++framesSinceCollect >= kCollectIntervalFrames;
-		const bool fullWalk = !throttleCollect || refreshImmediately || visibleGeometry.empty() || gridX != collectedGridX ||
-		                      gridY != collectedGridY || (refreshLoaded && ++scansSinceFullWalk >= kFullWalkIntervalScans);
-		CollectScene(refreshLoaded, fullWalk);
-		if (fullWalk)
-			scansSinceFullWalk = 0;
+		CollectScene(refreshLoaded);
 		if (refreshLoaded) {
-			framesSinceCollect = 0;
 			collectedGridX = gridX;
 			collectedGridY = gridY;
 		}
 		UpdateMaps(Util::GetCameraPosition(), direction, refreshImmediately);
+		visibleGeometry.clear();
 	} catch (const std::exception& error) {
 		logger::error("LOD Shadows disabled after rendering failure: {}", error.what());
 		ready = false;

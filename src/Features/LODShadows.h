@@ -102,7 +102,6 @@ private:
 	static_assert(sizeof(DrawData) == 176);
 	struct Caster
 	{
-		RE::NiPointer<RE::BSGeometry> geometry;
 		winrt::com_ptr<ID3D11Buffer> vertices;
 		winrt::com_ptr<ID3D11Buffer> indices;
 		winrt::com_ptr<ID3D11Buffer> instances;
@@ -158,8 +157,8 @@ private:
 	void CreateMaskResources();
 	void DrawMask();
 	void CollectTerrain();
-	void CollectLoadedObjects(bool a_fullWalk);
-	void CollectScene(bool a_refreshLoaded, bool a_fullWalk);
+	void CollectLoadedObjects();
+	void CollectScene(bool a_refreshLoaded);
 	void HashGeometry(RE::BSGeometry* a_geometry);
 	void Collect(RE::NiAVObject* a_object, bool a_ignoreAppCulling = false, bool a_loadedObject = false);
 	void AddCaster(RE::BSGeometry* a_geometry);
@@ -201,21 +200,12 @@ private:
 	bool terrainAvailable = false;
 	float4 landBounds{};
 	float4 pendingLandBounds{};
-	std::vector<RE::NiPointer<RE::BSGeometry>> visibleGeometry;
+	// Not owned and cleared every frame: a reference kept across the game's scene update
+	// outlives the LOD shape's alpha property, and releasing it crashes.
+	std::vector<RE::BSGeometry*> visibleGeometry;
+	bool hasLoadedGeometry = false;
 	std::vector<Caster> casters;
-	std::vector<RE::NiPointer<RE::BSGeometry>> loadedGeometry;
 	ankerl::unordered_dense::set<RE::BSGeometry*> collectedGeometry;
-	/** @brief Geometry last collected for one static reference, reused until a full walk or its root changes. */
-	struct LoadedRefEntry
-	{
-		RE::NiPointer<RE::NiAVObject> root;
-		bool culled = false;
-		uint64_t scanId = 0;
-		std::vector<RE::NiPointer<RE::BSGeometry>> geometry;
-	};
-	ankerl::unordered_dense::map<RE::TESObjectREFR*, LoadedRefEntry> loadedRefCache;
-	uint64_t loadedScanId = 0;
-	uint32_t scansSinceFullWalk = 0;
 	std::array<uint64_t, 4> sourceHashes{};
 	std::array<uint32_t, 4> geometryCounts{};
 	uint32_t lastUpdateFrame = 0;
